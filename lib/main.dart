@@ -182,7 +182,7 @@ class _HomePageState extends State<HomePage> {
 
 // ------------------------ Utilities ------------------------
 double? parseTimeToSeconds(String input) {
-  if (input == null || input.trim().isEmpty) return null;
+  if (input.trim().isEmpty) return null;
   var s = input.trim().replaceAll(",", ".");
   if (s.contains(":")) {
     final parts = s.split(":").map((p) => p.trim()).toList();
@@ -416,7 +416,7 @@ class _ProcessPageState extends State<ProcessPage> {
         segIdx++;
         final s = r['start']!;
         final e = r['end']!;
-        final outName = '${fileIdx}_${segIdx}.mp4';
+        final outName = '${fileIdx}_$segIdx.mp4';
         final outPath = '${outputBase.path}/$outName';
 
         // avoid overwrite unless requested
