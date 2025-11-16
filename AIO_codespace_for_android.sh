@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-### codespace_android_menu_fancy_allinone.sh (UPDATED)
-### - Detect project root (where pubspec.yaml lives) and use absolute APK path there
-### - Option 5 = Commit & Push whole repo (git add -A; commit; push)
-### - Keeps colors, spinner, logs, error handling, menu loop.
+### AIO_codespace_for_android.sh
+### All-in-one interactive menu for Codespaces (Android-only)
+### Updated: fixed syntax errors and robust handling
+### - install requirements (JDK + Flutter + Android cmdline tools)
+### - build APK (Android path: build/app/outputs/flutter-apk/)
+### - upload APK to GitHub Release (choose debug/release/both if present)
+### - commit & push whole repo
+### - cleanup
+### Features: colored output, spinner, per-step logs (~/flutter_setup_logs), error handling & menu loop.
 
-# Defaults (override via env)
+# Defaults (override via env if needed)
 API_LEVEL="${API_LEVEL:-33}"
 BUILD_TOOLS_VERSION="${BUILD_TOOLS_VERSION:-33.0.2}"
 ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
@@ -111,18 +116,17 @@ find_project_root() {
   return 1
 }
 
-# returns apk path or empty
+# returns apk path or empty (prefer debug -> release -> newest)
 find_latest_apk() {
   local project_root
   project_root="$(find_project_root "$(pwd)")"
-  if [[ -z "$project_root" ]]; then
-    # if not in project, try using CWD build path fallback
-    local apk_dir="./build/app/outputs/flutter-apk"
+  local apk_dir
+  if [[ -n "$project_root" ]]; then
+    apk_dir="$project_root/build/app/outputs/flutter-apk"
   else
-    local apk_dir="$project_root/build/app/outputs/flutter-apk"
+    apk_dir="./build/app/outputs/flutter-apk"
   fi
 
-  # prefer app-debug, then app-release, then newest
   if [[ -f "$apk_dir/app-debug.apk" ]]; then
     echo "$apk_dir/app-debug.apk"
     return 0
@@ -136,6 +140,25 @@ find_latest_apk() {
   else
     echo ""
   fi
+}
+
+# NEW: list available debug/release apks (absolute paths)
+list_debug_release_apks() {
+  local project_root
+  project_root="$(find_project_root "$(pwd)")"
+  local apk_dir
+  if [[ -n "$project_root" ]]; then
+    apk_dir="$project_root/build/app/outputs/flutter-apk"
+  else
+    apk_dir="./build/app/outputs/flutter-apk"
+  fi
+  local debug="${apk_dir}/app-debug.apk"
+  local release="${apk_dir}/app-release.apk"
+  local dbg_out=""
+  local rel_out=""
+  if [[ -f "$debug" ]]; then dbg_out="$debug"; fi
+  if [[ -f "$release" ]]; then rel_out="$release"; fi
+  printf "%s|%s|%s" "$dbg_out" "$rel_out" "$apk_dir"
 }
 
 install_requirements() {
@@ -256,7 +279,7 @@ build_apk() {
   return 0
 }
 
-# Post-build submenu (same)
+# Post-build submenu
 post_build_menu() {
   local apk="$1"
   while true; do
@@ -279,24 +302,86 @@ post_build_menu() {
   done
 }
 
-upload_to_release() {
-  local apk="$1"
-  # If no apk, offer build or return
-  if [[ -z "$apk" || ! -f "$apk" ]]; then
-    warn "Tidak ada APK yang valid ditemukan di build/app/outputs/flutter-apk/."
-    echo "1) Build sekarang"
-    echo "2) Kembali ke menu utama"
-    read -rp "Pilih (1/2): " choice
+# select which apks to upload: debug, release, both, or none
+select_apks_for_upload() {
+  # returns newline-separated list of files to upload (or nothing)
+  IFS='|' read -r debug_path release_path apk_dir <<< "$(list_debug_release_apks)"
+  debug_path="${debug_path:-}"
+  release_path="${release_path:-}"
+
+  if [[ -n "$debug_path" && -n "$release_path" ]]; then
+    echo
+    echo -e "${BOLD}${CLR_CYAN}Ditemukan kedua APK:${CLR_RESET}"
+    echo "1) Upload hanya debug: $debug_path"
+    echo "2) Upload hanya release: $release_path"
+    echo "3) Upload keduanya"
+    echo "4) Batal (kembali ke menu utama)"
+    read -rp "Pilih (1/2/3/4): " choice
     case "$choice" in
-      1) build_apk || return 1
-         apk="$(find_latest_apk)"
-         [[ -n "$apk" ]] || { handle_failure "Tidak ada APK setelah build."; return 1; }
-         ;;
-      2) ok "Kembali ke menu utama."; return 0 ;;
-      *) warn "Pilihan tidak valid. Kembali ke menu utama."; return 0 ;;
+      1) printf "%s\n" "$debug_path"; return 0 ;;
+      2) printf "%s\n" "$release_path"; return 0 ;;
+      3) printf "%s\n%s\n" "$debug_path" "$release_path"; return 0 ;;
+      4) return 1 ;;
+      *) warn "Pilihan tidak valid. Batal."; return 1 ;;
     esac
+  elif [[ -n "$debug_path" ]]; then
+    printf "%s\n" "$debug_path"
+    return 0
+  elif [[ -n "$release_path" ]]; then
+    printf "%s\n" "$release_path"
+    return 0
+  else
+    # none found
+    return 1
+  fi
+}
+
+upload_to_release() {
+  local apk_arg="${1:-}"
+  local files_to_upload=()
+
+  # If caller provided an apk path, use it (if exists)
+  if [[ -n "$apk_arg" && -f "$apk_arg" ]]; then
+    files_to_upload+=("$apk_arg")
+  else
+    # try to select from project build folder
+    if files_list="$(select_apks_for_upload)"; then
+      # read lines safely and append
+      while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+          files_to_upload+=("$line")
+        fi
+      done <<< "$files_list"
+    else
+      # nothing found -> offer build or return
+      warn "Tidak ada APK yang valid ditemukan di build/app/outputs/flutter-apk/."
+      echo "1) Build sekarang"
+      echo "2) Kembali ke menu utama"
+      read -rp "Pilih (1/2): " choice
+      case "$choice" in
+        1)
+          build_apk || return 1
+          # after build, re-select
+          if files_list="$(select_apks_for_upload)"; then
+            while IFS= read -r line; do
+              if [[ -n "$line" ]]; then
+                files_to_upload+=("$line")
+              fi
+            done <<< "$files_list"
+          fi
+          ;;
+        2) ok "Kembali ke menu utama."; return 0 ;;
+        *) warn "Pilihan tidak valid. Kembali ke menu utama."; return 0 ;;
+      esac
+    fi
   fi
 
+  if [[ ${#files_to_upload[@]} -eq 0 ]]; then
+    warn "Tidak ada file untuk di-upload. Kembali ke menu utama."
+    return 0
+  fi
+
+  # Ensure gh exists & auth
   if ! command -v gh >/dev/null 2>&1; then
     warn "GitHub CLI (gh) tidak ditemukan."
     read -rp "Install GitHub CLI now? (y/N): " yn
@@ -320,13 +405,22 @@ upload_to_release() {
     fi
   fi
 
+  # Create release and attach files. If >1 file, pass them all to gh release create.
   TAG="auto-apk-$(date +%Y%m%d%H%M%S)"
   RELEASE_TITLE="APK $TAG"
-  if ! run_with_spinner "Creating GitHub release $TAG and uploading APK..." "gh_release_upload" gh release create "$TAG" "$apk" --title "$RELEASE_TITLE" --notes "Automated APK upload: $apk"; then
+  info "Creating release $TAG and uploading ${#files_to_upload[@]} file(s)..."
+  # Build args array for gh
+  gh_args=( "release" "create" "$TAG" "--title" "$RELEASE_TITLE" "--notes" "Automated APK upload" )
+  for f in "${files_to_upload[@]}"; do
+    gh_args+=( "$f" )
+  done
+
+  if ! run_with_spinner "Creating GitHub release $TAG and uploading APK(s)..." "gh_release_upload" gh "${gh_args[@]}"; then
     handle_failure "gh release create/upload failed."
     return 1
   fi
-  ok "Upload complete. Release tag: $TAG"
+
+  ok "Upload complete. Release tag: $TAG (files: ${files_to_upload[*]})"
   return 0
 }
 
@@ -414,7 +508,7 @@ main_menu() {
     echo "1) Siapkan requirement saja (JDK, Flutter, Android SDK tools)"
     echo "2) Build APK saja (jalankan dari root project Flutter)"
     echo "3) Keduanya (setup + build)"
-    echo "4) Upload APK ke GitHub Release (cek APK; tawarkan build jika belum ada)"
+    echo "4) Upload APK ke GitHub Release (cek APK; tawarkan build jika belum ada). If both debug & release exist -> choose debug/release/both."
     echo "5) Commit & Push whole repo to GitHub (git add -A; commit; push)"
     echo "6) Bersihkan Flutter (flutter clean + remove build/)"
     echo "7) Exit"
