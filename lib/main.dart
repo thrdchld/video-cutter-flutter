@@ -1,19 +1,3 @@
-// =============================================================
-// Video Cutter – Flutter Native (using ffmpeg_kit_flutter_new ^4.1.0)
-// =============================================================
-// Fitur:
-// - Pilih file video
-// - Masukkan timestamp range (multi-line)
-// - Preview & simple edit (list of segments)
-// - Potong video menggunakan FFmpegKit (ffmpeg_kit_flutter_new)
-// - Output ke folder aplikasi (getApplicationDocumentsDirectory)
-// - Opsi ZIP
-// -------------------------------------------------------------
-// Pastikan pubspec.yaml mencantumkan:
-// ffmpeg_kit_flutter_new: ^4.1.0
-// file_picker, path_provider, permission_handler, archive
-// =============================================================
-
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -23,17 +7,19 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:archive/archive_io.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:video_player/video_player.dart';
 
 void main() {
-  runApp(const VideoCutterApp());
+  runApp(const KomitanKutterApp());
 }
 
-class VideoCutterApp extends StatelessWidget {
-  const VideoCutterApp({super.key});
+class KomitanKutterApp extends StatelessWidget {
+  const KomitanKutterApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: "Video Cutter Native",
+      title: 'Komitan Kutter',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -44,28 +30,28 @@ class VideoCutterApp extends StatelessWidget {
   }
 }
 
-// ------------------------ Home ------------------------
+// -------- Home Page --------
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  List<PlatformFile> pickedFiles = [];
+  PlatformFile? selectedFile;
   final TextEditingController timestampsCtrl = TextEditingController();
-  final TextEditingController folderCtrl = TextEditingController();
   final TextEditingController mergeGapCtrl = TextEditingController(text: "0");
   bool overwrite = false;
   bool zipOutput = false;
 
-  Future<void> pickFiles() async {
+  Future<void> pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
-      allowMultiple: true,
+      allowMultiple: false,
     );
-    if (result != null) {
-      setState(() => pickedFiles = result.files);
+    if (result != null && result.files.isNotEmpty) {
+      setState(() => selectedFile = result.files.first);
     }
   }
 
@@ -73,25 +59,23 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Video Cutter — Native"),
+        title: const Text("Komitan Kutter"),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         children: [
           ElevatedButton.icon(
-            onPressed: pickFiles,
+            onPressed: pickFile,
             icon: const Icon(Icons.video_file),
-            label: const Text("Pilih File Video"),
+            label: const Text("Pilih Video"),
           ),
-          if (pickedFiles.isNotEmpty)
-            Column(
-              children: pickedFiles.map((f) {
-                return ListTile(
-                  leading: const Icon(Icons.movie),
-                  title: Text(f.name),
-                  subtitle: Text("${(f.size / 1024 / 1024).toStringAsFixed(2)} MB"),
-                );
-              }).toList(),
+          if (selectedFile != null)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.movie),
+                title: Text(selectedFile!.name),
+                subtitle: Text("${(selectedFile!.size / 1024 / 1024).toStringAsFixed(2)} MB"),
+              ),
             ),
           const SizedBox(height: 16),
           const Text("Timestamp (satu baris = satu range):"),
@@ -101,15 +85,6 @@ class _HomePageState extends State<HomePage> {
             maxLines: 12,
             decoration: const InputDecoration(
               hintText: "00:00:05.000 - 00:00:20.500\n00:00:30 - 00:00:45",
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Text("Nama folder output (opsional):"),
-          TextField(
-            controller: folderCtrl,
-            decoration: const InputDecoration(
-              hintText: "myfolder",
               border: OutlineInputBorder(),
             ),
           ),
@@ -140,14 +115,16 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: () {
-              if (pickedFiles.isEmpty) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text("Pilih minimal 1 video")));
+              if (selectedFile == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Pilih video terlebih dahulu")),
+                );
                 return;
               }
               if (timestampsCtrl.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text("Masukkan timestamp")));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Masukkan timestamp")),
+                );
                 return;
               }
               final mergeGap = double.tryParse(mergeGapCtrl.text) ?? 0.0;
@@ -155,9 +132,8 @@ class _HomePageState extends State<HomePage> {
                 context,
                 MaterialPageRoute(
                   builder: (_) => PreviewPage(
-                    files: pickedFiles,
+                    file: selectedFile!,
                     timestamps: timestampsCtrl.text,
-                    baseName: folderCtrl.text.trim(),
                     mergeGap: mergeGap,
                     overwrite: overwrite,
                     zipOutput: zipOutput,
@@ -176,7 +152,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ------------------------ Utilities ------------------------
+// -------- Utilities --------
 double? parseTimeToSeconds(String input) {
   if (input.trim().isEmpty) return null;
   var s = input.trim().replaceAll(",", ".");
@@ -250,20 +226,36 @@ List<Map<String, double>> parseRanges(String text) {
   return out;
 }
 
-// ------------------------ Preview Page ------------------------
+List<Map<String, double>> mergeRanges(List<Map<String, double>> ranges, double gap) {
+  if (ranges.isEmpty) return [];
+  final list = ranges.map((e) => [e['start']!, e['end']!]).toList();
+  list.sort((a, b) => a[0].compareTo(b[0]));
+  final merged = <List<double>>[];
+  merged.add([list[0][0], list[0][1]]);
+  for (var i = 1; i < list.length; i++) {
+    final cur = list[i];
+    final last = merged.last;
+    if (cur[0] <= last[1] + gap) {
+      last[1] = cur[1] > last[1] ? cur[1] : last[1];
+    } else {
+      merged.add([cur[0], cur[1]]);
+    }
+  }
+  return merged.map((m) => {'start': m[0], 'end': m[1]}).toList();
+}
+
+// -------- Preview Page --------
 class PreviewPage extends StatefulWidget {
-  final List<PlatformFile> files;
+  final PlatformFile file;
   final String timestamps;
-  final String baseName;
   final double mergeGap;
   final bool overwrite;
   final bool zipOutput;
 
   const PreviewPage({
     super.key,
-    required this.files,
+    required this.file,
     required this.timestamps,
-    required this.baseName,
     required this.mergeGap,
     required this.overwrite,
     required this.zipOutput,
@@ -275,32 +267,44 @@ class PreviewPage extends StatefulWidget {
 
 class _PreviewPageState extends State<PreviewPage> {
   late List<Map<String, double>> ranges;
+  VideoPlayerController? _controller;
+  bool _isEditing = false;
+  int _editingIndex = -1;
 
   @override
   void initState() {
     super.initState();
     ranges = parseRanges(widget.timestamps);
-    // optional: merge ranges if mergeGap > 0
     if (widget.mergeGap > 0 && ranges.isNotEmpty) {
       ranges = mergeRanges(ranges, widget.mergeGap);
     }
+    _initializeVideo();
   }
 
-  List<Map<String, double>> mergeRanges(List<Map<String, double>> r, double gap) {
-    final list = r.map((e) => [e['start']!, e['end']!]).toList();
-    list.sort((a, b) => a[0].compareTo(b[0]));
-    final merged = <List<double>>[];
-    merged.add([list[0][0], list[0][1]]);
-    for (var i = 1; i < list.length; i++) {
-      final cur = list[i];
-      final last = merged.last;
-      if (cur[0] <= last[1] + gap) {
-        last[1] = cur[1] > last[1] ? cur[1] : last[1];
-      } else {
-        merged.add([cur[0], cur[1]]);
-      }
+  Future<void> _initializeVideo() async {
+    if (widget.file.path != null) {
+      _controller = VideoPlayerController.file(File(widget.file.path!));
+      await _controller!.initialize();
+      setState(() {});
     }
-    return merged.map((m) => {'start': m[0], 'end': m[1]}).toList();
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  void _toggleEdit(int index) {
+    setState(() {
+      if (_isEditing && _editingIndex == index) {
+        _isEditing = false;
+        _editingIndex = -1;
+      } else {
+        _isEditing = true;
+        _editingIndex = index;
+      }
+    });
   }
 
   @override
@@ -310,7 +314,7 @@ class _PreviewPageState extends State<PreviewPage> {
         title: const Text('Preview Segmen'),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             Expanded(
@@ -319,9 +323,101 @@ class _PreviewPageState extends State<PreviewPage> {
                 itemBuilder: (context, idx) {
                   final seg = ranges[idx];
                   return Card(
-                    child: ListTile(
-                      title: Text('Seg #${idx + 1}'),
-                      subtitle: Text('${secondsToHhmmssms(seg['start']!)} — ${secondsToHhmmssms(seg['end']!)}'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('Seg #${idx + 1}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              Text('${secondsToHhmmssms(seg['start']!)} — ${secondsToHhmmssms(seg['end']!)}'),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (_controller != null && _controller!.value.isInitialized)
+                            AspectRatio(
+                              aspectRatio: _controller!.value.aspectRatio,
+                              child: VideoPlayer(_controller!),
+                            ),
+                          const SizedBox(height: 8),
+                          if (_isEditing && _editingIndex == idx)
+                            Column(
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text('Start:'),
+                                    Expanded(
+                                      child: Slider(
+                                        value: seg['start']!,
+                                        min: 0,
+                                        max: _controller?.value.duration.inSeconds.toDouble() ?? 100,
+                                        onChanged: (v) {
+                                          setState(() {
+                                            seg['start'] = v;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 80,
+                                      child: TextField(
+                                        controller: TextEditingController(text: secondsToHhmmssms(seg['start']!)),
+                                        onSubmitted: (v) {
+                                          final parsed = parseTimeToSeconds(v);
+                                          if (parsed != null) {
+                                            setState(() {
+                                              seg['start'] = parsed;
+                                            });
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Row(
+                                  children: [
+                                    const Text('End:'),
+                                    Expanded(
+                                      child: Slider(
+                                        value: seg['end']!,
+                                        min: 0,
+                                        max: _controller?.value.duration.inSeconds.toDouble() ?? 100,
+                                        onChanged: (v) {
+                                          setState(() {
+                                            seg['end'] = v;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 80,
+                                      child: TextField(
+                                        controller: TextEditingController(text: secondsToHhmmssms(seg['end']!)),
+                                        onSubmitted: (v) {
+                                          final parsed = parseTimeToSeconds(v);
+                                          if (parsed != null) {
+                                            setState(() {
+                                              seg['end'] = parsed;
+                                            });
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () => _toggleEdit(idx),
+                              child: Text(_isEditing && _editingIndex == idx ? 'Done' : 'Edit Range'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },
@@ -335,9 +431,8 @@ class _PreviewPageState extends State<PreviewPage> {
                         context,
                         MaterialPageRoute(
                           builder: (_) => ProcessPage(
-                            files: widget.files,
+                            file: widget.file,
                             ranges: ranges,
-                            baseName: widget.baseName,
                             overwrite: widget.overwrite,
                             zipOutput: widget.zipOutput,
                           ),
@@ -346,7 +441,7 @@ class _PreviewPageState extends State<PreviewPage> {
                     },
               child: const Padding(
                 padding: EdgeInsets.symmetric(vertical: 14),
-                child: Text('Start Processing'),
+                child: Text('Mulai Potong Video'),
               ),
             ),
           ],
@@ -356,19 +451,17 @@ class _PreviewPageState extends State<PreviewPage> {
   }
 }
 
-// ------------------------ Process Page ------------------------
+// -------- Process Page --------
 class ProcessPage extends StatefulWidget {
-  final List<PlatformFile> files;
+  final PlatformFile file;
   final List<Map<String, double>> ranges;
-  final String baseName;
   final bool overwrite;
   final bool zipOutput;
 
   const ProcessPage({
     super.key,
-    required this.files,
+    required this.file,
     required this.ranges,
-    required this.baseName,
     required this.overwrite,
     required this.zipOutput,
   });
@@ -380,79 +473,76 @@ class ProcessPage extends StatefulWidget {
 class _ProcessPageState extends State<ProcessPage> {
   int totalSegments = 0;
   int doneSegments = 0;
-  String status = 'Idle';
-  late Directory outputBase;
+  String status = 'Preparing...';
+  Directory? outputBase;
+  List<String> outputFiles = [];
 
   @override
   void initState() {
     super.initState();
-    totalSegments = widget.ranges.length * widget.files.length;
+    totalSegments = widget.ranges.length;
     _startProcessing();
   }
 
   Future<void> _startProcessing() async {
     setState(() => status = 'Preparing storage...');
     await _ensurePermissions();
-    outputBase = await _prepareOutputFolder(widget.baseName);
+    outputBase = await _prepareOutputFolder();
     setState(() => status = 'Starting cuts...');
 
-    int fileIdx = 0;
-    for (final pf in widget.files) {
-      fileIdx++;
-      final srcPath = pf.path;
-      if (srcPath == null) {
-        setState(() => status = 'Skipping ${pf.name} (no path)');
+    final srcPath = widget.file.path;
+    if (srcPath == null) {
+      setState(() => status = 'Error: No file path');
+      return;
+    }
+
+    final localCopy = await _copyToAppTemp(File(srcPath));
+
+    for (int segIdx = 0; segIdx < widget.ranges.length; segIdx++) {
+      final r = widget.ranges[segIdx];
+      final s = r['start']!;
+      final e = r['end']!;
+      final outName = '${segIdx + 1}.mp4';
+      final outPath = '${outputBase!.path}/$outName';
+
+      // avoid overwrite unless requested
+      if (File(outPath).existsSync() && !widget.overwrite) {
+        setState(() {
+          doneSegments++;
+          outputFiles.add(outPath);
+        });
         continue;
       }
 
-      final localCopy = await _copyToAppTemp(File(srcPath));
+      setState(() => status = 'Cutting segment ${segIdx + 1}');
 
-      int segIdx = 0;
-      for (final r in widget.ranges) {
-        segIdx++;
-        final s = r['start']!;
-        final e = r['end']!;
-        final outName = '${fileIdx}_$segIdx.mp4';
-        final outPath = '${outputBase.path}/$outName';
+      // FFmpeg command: copy codec for fast trim
+      final cmd = '-y -ss $s -to $e -i "${localCopy.path}" -c copy "$outPath"';
 
-        // avoid overwrite unless requested
-        if (File(outPath).existsSync() && !widget.overwrite) {
-          setState(() {
-            doneSegments++;
-          });
-          continue;
-        }
+      final session = await FFmpegKit.execute(cmd);
+      final rc = await session.getReturnCode();
 
-        setState(() => status = 'Cutting ${pf.name} seg $segIdx');
-
-        // FFmpeg command: copy codec for fast trim
-        final cmd = '-y -ss $s -to $e -i "${localCopy.path}" -c copy "$outPath"';
-
-        final session = await FFmpegKit.execute(cmd);
-        final rc = await session.getReturnCode();
-
-        if (ReturnCode.isSuccess(rc)) {
-          setState(() {
-            doneSegments++;
-          });
-        } else {
-          final failMessage = 'FFmpeg failed for ${pf.name} seg $segIdx (rc=${rc?.getValue() ?? "null"})';
-          setState(() => status = failMessage);
-          // continue to next segment
-        }
+      if (ReturnCode.isSuccess(rc)) {
+        setState(() {
+          doneSegments++;
+          outputFiles.add(outPath);
+        });
+      } else {
+        final failMessage = 'FFmpeg failed for segment ${segIdx + 1} (rc=${rc?.getValue() ?? "null"})';
+        setState(() => status = failMessage);
+        // continue to next segment
       }
     }
 
-    if (widget.zipOutput) {
+    if (widget.zipOutput && outputFiles.isNotEmpty) {
       setState(() => status = 'Creating ZIP...');
-      await _createZip(outputBase);
+      await _createZip(outputBase!);
     }
 
     setState(() => status = 'Finished');
   }
 
   Future<void> _ensurePermissions() async {
-    // we use FilePicker so READ permission may be needed on some devices
     if (Platform.isAndroid) {
       final st = await Permission.storage.status;
       if (!st.isGranted) {
@@ -461,14 +551,13 @@ class _ProcessPageState extends State<ProcessPage> {
     }
   }
 
-  Future<Directory> _prepareOutputFolder(String baseName) async {
+  Future<Directory> _prepareOutputFolder() async {
     final doc = await getApplicationDocumentsDirectory();
     final date = DateTime.now();
-    final dateStr = '${date.year.toString().padLeft(4, "0")}${date.month.toString().padLeft(2, "0")}${date.day.toString().padLeft(2, "0")}';
-    final sanitized = (baseName.isEmpty) ? 'default' : baseName.replaceAll(RegExp(r'[^A-Za-z0-9_\-]'), '_');
-    final dir = Directory('${doc.path}/outputs/$sanitized/$dateStr-run1');
-    await dir.create(recursive: true);
-    return dir;
+    final dateStr = '${date.year}${date.month.toString().padLeft(2, "0")}${date.day.toString().padLeft(2, "0")}';
+    final base = Directory('${doc.path}/Komitan Kutter/$dateStr-StartKutter-${date.hour.toString().padLeft(2, "0")}.${date.minute.toString().padLeft(2, "0")}.${date.second.toString().padLeft(2, "0")}');
+    await base.create(recursive: true);
+    return base;
   }
 
   Future<File> _copyToAppTemp(File src) async {
@@ -483,7 +572,7 @@ class _ProcessPageState extends State<ProcessPage> {
     final zipPath = '${dir.path}/all_results.zip';
     zipEncoder.create(zipPath);
     for (final f in dir.listSync()) {
-      if (f is File && (f.path.endsWith('.mp4') || f.path.endsWith('.zip'))) {
+      if (f is File && f.path.endsWith('.mp4')) {
         zipEncoder.addFile(f);
       }
     }
@@ -504,6 +593,9 @@ class _ProcessPageState extends State<ProcessPage> {
             LinearProgressIndicator(value: pct),
             const SizedBox(height: 12),
             Text('Done: $doneSegments / $totalSegments'),
+            const SizedBox(height: 12),
+            if (outputBase != null)
+              Text('Output: ${outputBase!.path}', style: const TextStyle(fontSize: 12)),
             const Spacer(),
             if (status == 'Finished')
               ElevatedButton(

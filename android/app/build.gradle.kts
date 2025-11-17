@@ -1,14 +1,13 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
-    namespace = "com.example.video_cutter_flutter"
-
-    // compileSdk must be 36+ for plugin compatibility
-    compileSdk = 36
+    namespace = "com.example.video_cutter_new"
+    compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -21,30 +20,21 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.video_cutter_flutter"
-        // Ensure minSdk meets FFmpegKit requirement (>=24)
-        minSdk = 24
-        // targetSdk must be 36+ for plugin compatibility
-        targetSdk = 36
+        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        applicationId = "com.example.video_cutter_new"
+        // You can update the following values to match your application needs.
+        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
     buildTypes {
         release {
-        // Disable resource shrinking unless code shrinking (minify) is enabled
-        isMinifyEnabled = false
-        isShrinkResources = false
-            // Use debug signing for local testing; replace with release keystore for Play Store
+            // TODO: Add your own signing config for the release build.
+            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
-        }
-    }
-
-    // Optional: enable packagingOptions if necessary for native libs
-    packagingOptions {
-        resources {
-            excludes += setOf("META-INF/*.kotlin_module")
         }
     }
 }
